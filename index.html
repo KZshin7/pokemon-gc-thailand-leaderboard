@@ -40,7 +40,7 @@
         <div class="stat-row" aria-label="Leaderboard summary" data-i18n-aria-label="summaryLabel">
           <div class="stat"><strong id="entry-count">0</strong><span data-i18n="playerEntriesCount">player entries</span></div>
           <div class="stat-divider" aria-hidden="true"></div>
-          <div class="stat"><strong id="review-count">0</strong><span data-i18n="evidenceAwaitingCount">evidence photos (unverified)</span></div>
+          <div class="stat"><strong id="photo-entry-count">0</strong><span data-i18n="entriesWithPhotos">entries with photos</span></div>
           <div class="stat-divider" aria-hidden="true"></div>
           <div class="stat"><strong id="top-rating-stat">—</strong><span data-i18n="topCommunityRatingCount">top community rating</span></div>
         </div>
@@ -73,6 +73,12 @@
             </div>
             <p id="top-rating-value" class="top-rating-value">—</p>
           </section>
+          <div class="entry-filters" role="group" aria-label="Filter entries" data-i18n-aria-label="entryFiltersLabel">
+            <button type="button" class="entry-filter" data-entry-filter="all" aria-pressed="true" data-i18n="filterAll">All (0)</button>
+            <button type="button" class="entry-filter" data-entry-filter="with-photo" aria-pressed="false" data-i18n="filterWithPhoto">With photo (0)</button>
+            <button type="button" class="entry-filter" data-entry-filter="without-photo" aria-pressed="false" data-i18n="filterWithoutPhoto">Without photo (0)</button>
+          </div>
+          <p id="filter-result-count" class="filter-result-count" role="status" aria-live="polite"></p>
           <div id="entries-list" class="entries-list" aria-live="polite"></div>
         </section>
       </div>
@@ -89,7 +95,7 @@
       </div>
       <p id="form-description" class="panel-copy" data-i18n="formDescription">Submit a player name and rating. No account or email is required.</p>
 
-      <div id="auth-required" class="verify-panel" hidden>
+      <div id="auth-required" class="auth-panel" hidden>
         <p data-i18n="signInRequiredDescription">Sign in with Google to create or edit your entry. Your email is used only by the sign-in provider.</p>
         <p id="auth-message" class="message" role="status" aria-live="polite"></p>
         <button id="dialog-sign-in" class="primary-button" type="button" data-i18n="signInWithGoogle">Sign in with Google</button>
@@ -125,7 +131,7 @@
 
     <footer>
       <span data-i18n="communityRun">Community-run · Not affiliated with The Pokémon Company</span>
-      <span data-i18n="entriesUnverified">Entries and evidence are not independently verified</span>
+      <span data-i18n="communitySubmittedNotice">Player information is submitted by community members</span>
     </footer>
   </body>
 </html>

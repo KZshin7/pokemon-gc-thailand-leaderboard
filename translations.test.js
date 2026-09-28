@@ -34,8 +34,8 @@ test("both languages include every dictionary key and translate the requested he
   assert.equal(translate("en", "heroTitle"), "for THAILAND region only");
   assert.equal(translate("th", "heroTitle"), "สำหรับภูมิภาคประเทศไทยเท่านั้น");
   assert.notEqual(translate("en", "localOnlyDescription"), translate("th", "localOnlyDescription"));
-  assert.notEqual(translate("en", "evidenceAwaitingCount"), translate("th", "evidenceAwaitingCount"));
-  assert.notEqual(translate("en", "evidenceUnverified"), translate("th", "evidenceUnverified"));
+  assert.notEqual(translate("en", "entriesWithPhotos"), translate("th", "entriesWithPhotos"));
+  assert.notEqual(translate("en", "filterWithPhoto"), translate("th", "filterWithPhoto"));
 });
 
 test("static page translation and accessibility keys exist in both languages", async () => {

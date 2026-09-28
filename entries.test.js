@@ -5,6 +5,7 @@ import {
   MAX_EVIDENCE_BYTES,
   MAX_EVIDENCE_DIMENSION,
   MAX_EVIDENCE_SOURCE_BYTES,
+  filterRankedEntries,
   getRankedEntries,
   getTopRatedEntry,
   validateCompressedEvidence,
@@ -76,6 +77,24 @@ test("assigns sequential leaderboard ranks after sorting, including equal rating
     getRankedEntries(entries).map(({ entry, rank }) => [entry.id, rank]),
     [["newer-tie", 1], ["older-tie", 2], ["lower", 3]],
   );
+});
+
+test("filters ranked entries by photo presence without renumbering their overall rank", () => {
+  const ranked = getRankedEntries([
+    { id: "photo-high", rating: 2000, hasEvidence: true, createdAt: 4 },
+    { id: "no-photo", rating: 1800, hasEvidence: false, createdAt: 3 },
+    { id: "photo-low", rating: 1600, hasEvidence: true, createdAt: 2 },
+  ]);
+  assert.deepEqual(filterRankedEntries(ranked, "all"), ranked);
+  assert.deepEqual(
+    filterRankedEntries(ranked, "with-photo").map(({ entry, rank }) => [entry.id, rank]),
+    [["photo-high", 1], ["photo-low", 3]],
+  );
+  assert.deepEqual(
+    filterRankedEntries(ranked, "without-photo").map(({ entry, rank }) => [entry.id, rank]),
+    [["no-photo", 2]],
+  );
+  assert.deepEqual(filterRankedEntries([], "with-photo"), []);
 });
 
 test("sets the client resize dimension within the configured image cap", () => {

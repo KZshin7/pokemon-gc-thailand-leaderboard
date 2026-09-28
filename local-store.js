@@ -18,7 +18,7 @@ export function loadLocalEntries(storage) {
 
   const entries = JSON.parse(serialized);
   if (!Array.isArray(entries)) throw new Error("Saved entries are not in a valid format.");
-  return entries;
+  return entries.map(({ verificationStatus: _legacyVerificationStatus, ...entry }) => entry);
 }
 
 export function saveLocalEntry({
@@ -55,7 +55,6 @@ export function saveLocalEntry({
     evidenceDataUrl: nextEvidence,
     hasEvidence: nextEvidence !== null,
     revision: (existing?.revision ?? 0) + 1,
-    verificationStatus: "unverified",
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };

@@ -1,7 +1,7 @@
 import { validateEntryFields } from "./entries.js";
 
 const PUBLIC_ENTRY_FIELDS =
-  "id,player_name,rating,has_evidence,verification_status,verified_at,created_at,updated_at";
+  "id,player_name,rating,has_evidence,created_at,updated_at";
 
 export async function listPublicEntries(client) {
   const { data, error } = await client
@@ -18,14 +18,6 @@ export async function getMyEntry(client) {
   if (error) throw error;
   const ownEntry = data?.[0];
   return ownEntry ? { id: ownEntry.entry_id, evidencePath: ownEntry.evidence_path } : null;
-}
-
-export async function getEntryEvidencePathForReview(client, entryId) {
-  const { data, error } = await client.rpc("get_leaderboard_evidence_path_for_review", {
-    p_entry_id: entryId,
-  });
-  if (error) throw error;
-  return data;
 }
 
 export async function saveCloudEntry({
@@ -107,22 +99,12 @@ export async function createEvidenceUrl(client, evidencePath) {
   return data.signedUrl;
 }
 
-export async function reviewEntry(client, entryId, status) {
-  const { error } = await client.rpc("review_leaderboard_entry", {
-    p_entry_id: entryId,
-    p_status: status,
-  });
-  if (error) throw error;
-}
-
 function mapPublicEntry(row) {
   return {
     id: row.id,
     playerName: row.player_name,
     rating: row.rating,
     hasEvidence: row.has_evidence,
-    verificationStatus: row.verification_status,
-    verifiedAt: row.verified_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

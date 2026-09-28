@@ -24,15 +24,13 @@ test("Supabase configuration requires both a URL and anon key and rejects insecu
   }));
 });
 
-test("public leaderboard query requests only public fields and excludes owner identity and evidence paths", async () => {
+test("public leaderboard query requests only name, rating, photo presence, and timestamps", async () => {
   let requestedFields = "";
   const row = {
     id: "entry-id",
     player_name: "Pika",
     rating: 1842,
     has_evidence: true,
-    verification_status: "pending",
-    verified_at: null,
     created_at: "2026-09-28T00:00:00Z",
     updated_at: "2026-09-28T00:00:00Z",
   };
@@ -54,12 +52,11 @@ test("public leaderboard query requests only public fields and excludes owner id
     playerName: row.player_name,
     rating: row.rating,
     hasEvidence: true,
-    verificationStatus: "pending",
-    verifiedAt: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
-  assert.doesNotMatch(requestedFields, /owner_id|email|evidence_path|reviewed_by/i);
+  assert.equal(requestedFields, "id,player_name,rating,has_evidence,created_at,updated_at");
+  assert.doesNotMatch(requestedFields, /owner_id|email|evidence_path|reviewed_by|verification_status/i);
 });
 
 test("cloud save accepts three-place ratings and rejects excess precision before writing", async () => {
@@ -96,24 +93,29 @@ test("cloud save accepts three-place ratings and rejects excess precision before
   );
 });
 
-test("migration restricts public fields and protects ownership, review state, and private evidence", async () => {
+test("migration restricts public fields and protects ownership and private evidence", async () => {
   const migration = await readFile(
     new URL("./supabase/migrations/202609280001_leaderboard.sql", import.meta.url),
     "utf8",
   );
-  assert.match(migration, /grant select \([\s\S]*id, player_name, rating, has_evidence, verification_status, verified_at, created_at, updated_at[\s\S]*\) on public\.leaderboard_entries to anon, authenticated/i);
-  assert.doesNotMatch(migration, /grant select \([^)]*(?:owner_id|evidence_path|reviewed_by)/i);
-  assert.match(migration, /with check \(owner_id = \(select auth\.uid\(\)\) and verification_status = 'pending'\)/i);
-  assert.match(migration, /using \(owner_id = \(select auth\.uid\(\)\)\)[\s\S]*with check \(owner_id = \(select auth\.uid\(\)\)\)/i);
-  assert.match(migration, /new\.verification_status := 'pending'/i);
-  assert.match(migration, /new\.owner_id := auth\.uid\(\)/i);
-  assert.match(migration, /grant insert \(player_name, rating, evidence_path\)/i);
-  assert.match(migration, /rating numeric not null/i);
-  assert.match(migration, /rating between 0 and 9999 and rating = trunc\(rating, 3\)/i);
-  assert.match(migration, /role' = 'leaderboard_reviewer'/i);
-  assert.match(migration, /verification_status in \('pending', 'verified', 'rejected'\)/i);
+  const upgrade = await readFile(
+    new URL("./supabase/migrations/202609280002_remove_entry_review.sql", import.meta.url),
+    "utf8",
+  );
+  const allMigrations = `${migration}\n${upgrade}`;
+  assert.match(allMigrations, /grant select \([\s\S]*id, player_name, rating, has_evidence, created_at, updated_at[\s\S]*\) on public\.leaderboard_entries to anon, authenticated/i);
+  assert.doesNotMatch(allMigrations, /grant select \([^)]*(?:owner_id|evidence_path|reviewed_by)/i);
+  assert.match(allMigrations, /with check \(owner_id = \(select auth\.uid\(\)\)\)/i);
+  assert.match(allMigrations, /using \(owner_id = \(select auth\.uid\(\)\)\)[\s\S]*with check \(owner_id = \(select auth\.uid\(\)\)\)/i);
+  assert.match(allMigrations, /new\.owner_id := auth\.uid\(\)/i);
+  assert.match(allMigrations, /grant insert \(player_name, rating, evidence_path\)/i);
+  assert.match(allMigrations, /rating numeric not null/i);
+  assert.match(allMigrations, /rating between 0 and 9999 and rating = trunc\(rating, 3\)/i);
+  assert.match(upgrade, /drop column if exists verification_status/i);
+  assert.match(upgrade, /drop function if exists public\.review_leaderboard_entry/i);
+  assert.doesNotMatch(migration, /create or replace function public\.(?:is_leaderboard_reviewer|review_leaderboard_entry|get_leaderboard_evidence_path_for_review)/i);
+  assert.doesNotMatch(allMigrations, /create policy "Owners and reviewers can read evidence"/i);
   assert.match(migration, /values \('leaderboard-evidence', 'leaderboard-evidence', false, 1048576, array\['image\/jpeg'\]\)/i);
-  assert.match(migration, /storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text/i);
-  assert.match(migration, /get_leaderboard_evidence_path_for_review/);
-  assert.match(migration, /review_leaderboard_entry/);
+  assert.match(allMigrations, /storage\.foldername\(name\)\)\[1\] = \(select auth\.uid\(\)\)::text/i);
+  assert.match(allMigrations, /create policy "Owners can read evidence"/i);
 });

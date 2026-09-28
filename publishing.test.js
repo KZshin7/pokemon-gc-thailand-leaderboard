@@ -13,6 +13,10 @@ test("static page has sharing metadata and an explicit setup/demo state", async 
   assert.match(html, /name="rating" type="text" inputmode="decimal" maxlength="8" pattern="\[0-9\]\+\(\[\.,\]\[0-9\]\{1,3\}\)\?"/);
   assert.match(html, /id="leaderboard-title"/);
   assert.match(html, /id="entries-list" class="entries-list" aria-live="polite"/);
+  assert.match(html, /data-entry-filter="all"/);
+  assert.match(html, /data-entry-filter="with-photo"/);
+  assert.match(html, /data-entry-filter="without-photo"/);
+  assert.doesNotMatch(html, /verification status|unverified|reviewer/i);
   assert.doesNotMatch(html, /(?:href|src)="\/(?:assets|app\.js|styles\.css|favicon)/);
 });
 

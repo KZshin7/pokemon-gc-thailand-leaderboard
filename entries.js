@@ -60,6 +60,16 @@ export function getRankedEntries(entries) {
     .map((entry, index) => ({ entry, rank: index + 1 }));
 }
 
+export function filterRankedEntries(rankedEntries, filter) {
+  if (filter === "with-photo") {
+    return rankedEntries.filter(({ entry }) => entry.hasEvidence);
+  }
+  if (filter === "without-photo") {
+    return rankedEntries.filter(({ entry }) => !entry.hasEvidence);
+  }
+  return rankedEntries;
+}
+
 function getTimestamp(value) {
   if (typeof value?.toMillis === "function") return value.toMillis();
   if (typeof value === "number") return value;

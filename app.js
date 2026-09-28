@@ -1,12 +1,10 @@
 import { prepareEvidenceImage } from "./evidence.js";
-import { getRankedEntries, getTopRatedEntry, validateEntryFields } from "./entries.js";
+import { filterRankedEntries, getRankedEntries, getTopRatedEntry, validateEntryFields } from "./entries.js";
 import { getLocalOwnerId, loadLocalEntries, saveLocalEntry } from "./local-store.js";
 import {
   createEvidenceUrl,
-  getEntryEvidencePathForReview,
   getMyEntry,
   listPublicEntries,
-  reviewEntry,
   saveCloudEntry,
 } from "./cloud-store.js";
 import { createSupabaseClient, getSupabaseConfig } from "./supabase-client.js";
@@ -25,8 +23,10 @@ const openEntryDialogButton = document.querySelector("#open-entry-dialog");
 const closeEntryDialogButton = document.querySelector("#close-entry-dialog");
 const formTitle = document.querySelector("#form-title");
 const entriesList = document.querySelector("#entries-list");
+const entryFilters = [...document.querySelectorAll("[data-entry-filter]")];
+const filterResultCount = document.querySelector("#filter-result-count");
 const entryCount = document.querySelector("#entry-count");
-const reviewCount = document.querySelector("#review-count");
+const photoEntryCount = document.querySelector("#photo-entry-count");
 const topRatingStat = document.querySelector("#top-rating-stat");
 const topRatingName = document.querySelector("#top-rating-name");
 const topRatingStatus = document.querySelector("#top-rating-status");
@@ -61,7 +61,7 @@ let entries = [];
 let ownerId;
 let activeUser = null;
 let myCloudEntry = null;
-let isReviewer = false;
+let entryFilter = "all";
 let editingId = null;
 let dialogTrigger = openEntryDialogButton;
 let language = "en";
@@ -94,6 +94,12 @@ if (supabase) {
 
 for (const [selectedLanguage, button] of Object.entries(languageButtons)) {
   button.addEventListener("click", () => setLanguage(selectedLanguage));
+}
+for (const button of entryFilters) {
+  button.addEventListener("click", () => {
+    entryFilter = button.dataset.entryFilter;
+    renderEntries();
+  });
 }
 
 openEntryDialogButton.addEventListener("click", () => {
@@ -184,10 +190,16 @@ signOutButton.addEventListener("click", () => void signOut());
 function renderEntries() {
   entriesList.replaceChildren();
   const rankedEntries = getRankedEntries(entries);
+  const filteredEntries = filterRankedEntries(rankedEntries, entryFilter);
   const leader = getTopRatedEntry(entries);
 
   entryCount.textContent = String(entries.length);
-  reviewCount.textContent = String(entries.filter((entry) => entry.hasEvidence && entry.verificationStatus === "pending").length);
+  photoEntryCount.textContent = String(entries.filter((entry) => entry.hasEvidence).length);
+  filterResultCount.textContent = translate(language, "filterResultCount", {
+    shown: Number(filteredEntries.length).toLocaleString(language === "th" ? "th-TH" : "en"),
+    total: Number(entries.length).toLocaleString(language === "th" ? "th-TH" : "en"),
+  });
+  updateEntryFilters();
 
   if (!leader) {
     topRatingStat.textContent = "—";
@@ -198,20 +210,47 @@ function renderEntries() {
     const rating = Number(leader.rating).toLocaleString(language === "th" ? "th-TH" : "en");
     topRatingStat.textContent = rating;
     topRatingName.textContent = leader.playerName;
-    topRatingStatus.textContent = statusText(leader);
+    topRatingStatus.textContent = translate(language, "highestRatingListed");
     topRatingValue.textContent = rating;
   }
 
-  if (rankedEntries.length === 0) {
+  if (entries.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = translate(language, "firstThailandEntry");
     entriesList.append(empty);
+  } else if (filteredEntries.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = translate(
+      language,
+      entryFilter === "with-photo" ? "noEntriesWithPhoto" : "noEntriesWithoutPhoto",
+    );
+    entriesList.append(empty);
   } else {
-    for (const { entry, rank } of rankedEntries) {
+    for (const { entry, rank } of filteredEntries) {
       entriesList.append(renderEntryCard(entry, rank));
     }
   }
+}
+
+function updateEntryFilters() {
+  const counts = {
+    all: entries.length,
+    "with-photo": entries.filter((entry) => entry.hasEvidence).length,
+    "without-photo": entries.filter((entry) => !entry.hasEvidence).length,
+  };
+  for (const button of entryFilters) {
+    const filter = button.dataset.entryFilter;
+    button.setAttribute("aria-pressed", String(entryFilter === filter));
+    button.textContent = translate(language, `filter${filterKey(filter)}`, {
+      count: Number(counts[filter]).toLocaleString(language === "th" ? "th-TH" : "en"),
+    });
+  }
+}
+
+function filterKey(filter) {
+  return filter === "with-photo" ? "WithPhoto" : filter === "without-photo" ? "WithoutPhoto" : "All";
 }
 
 function renderEntryCard(entry, rank) {
@@ -244,16 +283,15 @@ function renderEntryCard(entry, rank) {
   ratingLabel.textContent = translate(language, "rating");
   rating.append(ratingValue, ratingLabel);
 
-  const status = document.createElement("p");
-  status.className = "entry-status";
-  status.textContent = statusText(entry);
-
   const details = document.createElement("p");
   details.className = "entry-date";
   details.textContent = translate(language, "submittedOn", { date: formatDate(entry.createdAt) });
-  card.append(position, heading, rating, status, details);
+  const photoPresence = document.createElement("p");
+  photoPresence.className = "entry-photo-presence";
+  photoPresence.textContent = translate(language, entry.hasEvidence ? "hasPhoto" : "noPhoto");
+  card.append(position, heading, rating, photoPresence, details);
 
-  if (entry.hasEvidence && (entry.evidenceDataUrl || (supabase && (entry.isMine || isReviewer)))) {
+  if (entry.hasEvidence && (entry.evidenceDataUrl || (supabase && entry.isMine))) {
     const evidenceButton = document.createElement("button");
     evidenceButton.type = "button";
     evidenceButton.className = "edit-button";
@@ -270,26 +308,7 @@ function renderEntryCard(entry, rank) {
     editButton.addEventListener("click", (event) => editEntry(entry, event.currentTarget));
     card.append(editButton);
   }
-  if (supabase && isReviewer && entry.verificationStatus === "pending") {
-    const reviewActions = document.createElement("div");
-    reviewActions.className = "review-actions";
-    for (const [status, key] of [["verified", "markVerified"], ["rejected", "markRejected"]]) {
-      const reviewButton = document.createElement("button");
-      reviewButton.type = "button";
-      reviewButton.className = "secondary-button";
-      reviewButton.textContent = translate(language, key);
-      reviewButton.addEventListener("click", () => void setEntryReviewStatus(entry, status));
-      reviewActions.append(reviewButton);
-    }
-    card.append(reviewActions);
-  }
   return card;
-}
-
-function statusText(entry) {
-  if (entry.verificationStatus === "verified") return translate(language, "verifiedStatus");
-  if (entry.verificationStatus === "rejected") return translate(language, "rejectedStatus");
-  return translate(language, entry.hasEvidence ? "evidenceUnverified" : "noEvidenceUnverified");
 }
 
 function editEntry(entry, trigger) {
@@ -462,7 +481,6 @@ async function initializeCloud() {
 
 async function updateAuthState(user) {
   activeUser = user;
-  isReviewer = user?.app_metadata?.role === "leaderboard_reviewer";
   myCloudEntry = null;
   setApplicationMode();
   setFormAuthenticationState();
@@ -515,9 +533,7 @@ async function showEvidence(entry, card) {
     if (entry.evidenceDataUrl) {
       evidenceUrl = entry.evidenceDataUrl;
     } else {
-      const path = entry.isMine
-        ? myCloudEntry?.evidencePath
-        : await getEntryEvidencePathForReview(supabase, entry.id);
+      const path = entry.isMine ? myCloudEntry?.evidencePath : null;
       if (!path) throw new Error("No photo evidence is available for this entry.");
       evidenceUrl = await createEvidenceUrl(supabase, path);
     }
@@ -540,16 +556,6 @@ async function showCurrentCloudEvidence(evidencePath) {
     currentEvidence.replaceChildren(image);
   } catch (error) {
     showMessage(formMessage, translateLocalError(language, error), true);
-  }
-}
-
-async function setEntryReviewStatus(entry, status) {
-  try {
-    await reviewEntry(supabase, entry.id, status);
-    await refreshCloudEntries();
-    showMessage(appMessage, translate(language, status === "verified" ? "entryVerified" : "entryRejected"));
-  } catch (error) {
-    showMessage(appMessage, translateLocalError(language, error), true);
   }
 }
 

@@ -18,11 +18,10 @@ To use the shared backend locally, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_AN
 1. Create a Supabase project. In **Project Settings → API**, copy the Project URL and anon/publishable key for the build configuration. Do not use or expose the `service_role` key.
 2. In **Authentication → Providers → Google**, enable Google and enter the OAuth client ID and client secret from a Google Cloud OAuth web application. In Google Cloud, add the Supabase callback URI (`https://<project-ref>.supabase.co/auth/v1/callback`) as an authorized redirect URI and the Supabase project origin as an authorized JavaScript origin.
 3. In **Authentication → URL Configuration**, set the production site URL to `https://kzshin7.github.io/pokemon-gc-thailand-leaderboard/` (or your Pages URL) and allow that exact URL plus `http://127.0.0.1:5173/**` for local development. OAuth returns to the page that initiated sign-in.
-4. Apply `supabase/migrations/202609280001_leaderboard.sql` in **SQL Editor** (or with the Supabase CLI). It is safe to re-run. It creates the constrained leaderboard table, owner/reviewer RLS policies, private `leaderboard-evidence` bucket and storage policies, review RPCs, and Realtime publication membership. Do not loosen the policies or make the bucket public.
-5. Confirm the bucket is private with a 1 MB limit and JPEG-only MIME type. The script applies these settings and restricts object paths to each authenticated user's UUID folder. Evidence can be read only by its owner or a reviewer; signed URLs are short-lived and are never put in public records.
-6. For review access, have the reviewer sign in once with Google. In **Authentication → Users**, edit that user’s **app metadata** to include `"role": "leaderboard_reviewer"` (not user metadata). Have them sign out and back in/refresh their session. Reviewers then see buttons to mark pending entries verified or not verified, and can view their private evidence. Only the guarded database RPC can change verification state. Remove the app-metadata role to revoke review access.
+4. Apply `supabase/migrations/202609280001_leaderboard.sql` and then `supabase/migrations/202609280002_remove_entry_review.sql` in order in **SQL Editor** (or apply all migrations with the Supabase CLI). Both scripts are idempotent. They create the constrained leaderboard table, owner-only RLS policies, private `leaderboard-evidence` bucket and storage policies, and Realtime publication membership. Do not loosen the policies or make the bucket public.
+5. Confirm the bucket is private with a 1 MB limit and JPEG-only MIME type. The script applies these settings and restricts object paths to each authenticated user's UUID folder. Evidence can be read only by its owner; signed URLs are short-lived and are never put in public records.
 
-Public visitors can read only player name, rating, evidence-presence, verification status, and timestamps. The owner UUID, evidence path, reviewer identity, and all Auth data are not selectable from the public table. Google email is handled only by Supabase Auth and is never copied into leaderboard rows or displayed. Account owners can edit only their own entry; database RLS enforces this independently of the UI. Changing an entry resets its status to pending. Each Google account is limited to one entry.
+Public visitors can read only player name, rating, evidence-presence, and timestamps. The owner UUID, evidence path, and all Auth data are not selectable from the public table. Google email is handled only by Supabase Auth and is never copied into leaderboard rows or displayed. Account owners can edit only their own entry; database RLS enforces this independently of the UI. Each Google account is limited to one entry. Entries are community submissions; there is no verification or reviewer workflow.
 
 ## Publish with GitHub Pages
 
@@ -37,9 +36,9 @@ The expected Pages URL is <https://kzshin7.github.io/pokemon-gc-thailand-leaderb
 
 ## Protections and residual risks
 
-The database validates names and ratings, derives evidence-presence and timestamps, prevents client changes to review fields, and enforces owner-only updates with RLS. Storage enforces private access, JPEG-only uploads, and a 1 MB cap; the browser additionally accepts only JPEG/PNG/WebP source images up to 10 MB and resizes them to JPEG before upload. Supabase Auth's provider limits plus one row per account provide basic abuse controls.
+The database validates names and ratings, derives evidence-presence and timestamps, and enforces owner-only updates with RLS. Storage enforces private access, JPEG-only uploads, and a 1 MB cap; the browser additionally accepts only JPEG/PNG/WebP source images up to 10 MB and resizes them to JPEG before upload. Supabase Auth's provider limits plus one row per account provide basic abuse controls.
 
-This static client cannot enforce per-IP rate limits or prevent determined users from creating multiple Google accounts. Public leaderboard names/ratings are visible to everyone, and ratings/evidence remain user-submitted until a reviewer verifies them. A signed evidence link is a short-lived bearer URL (60 seconds), so authorized viewers should not share it. Configure Supabase Auth security/rate limits, protect reviewer accounts, and monitor project usage. Demo mode is intentionally local-only and is not shared or secure; its `localStorage` is not used as the authority when Supabase is configured.
+This static client cannot enforce per-IP rate limits or prevent determined users from creating multiple Google accounts. Public leaderboard names/ratings are visible to everyone, and entries have no verification process. A signed evidence link is a short-lived bearer URL (60 seconds), so owners should not share it. Configure Supabase Auth security/rate limits and monitor project usage. Demo mode is intentionally local-only and is not shared or secure; its `localStorage` is not used as the authority when Supabase is configured.
 
 ## Tests
 
@@ -48,4 +47,6 @@ npm test
 npm run build
 ```
 
-Tests cover local demo behavior, validation, translations, production build configuration, safe public-field selection, and SQL policy/migration safeguards.
+The second migration upgrades projects that already applied the earlier version of this PR with reviewer verification. It removes that workflow and its stored review metadata/authorization policies; back up first if you need to retain historical verification decisions. Player entries and private evidence objects are preserved.
+
+Tests cover local demo behavior, validation, photo filtering, translations, production build configuration, safe public-field selection, and SQL policy/migration safeguards.
