@@ -54,7 +54,10 @@ test("static page translation and accessibility keys exist in both languages", a
   assert.ok(entryForm, "entry form exists");
   assert.doesNotMatch(entryForm, /type="email"|name="email"/);
   assert.doesNotMatch(html, /firebase|auth-form/i);
-  assert.doesNotMatch(app, /firebase|email/i);
+  assert.doesNotMatch(app, /firebase|type="email"|name="email"/i);
+  assert.match(app, /getSupabaseConfig/);
+  assert.match(app, /signInWithOAuth/);
+  assert.match(app, /getMyEntry/);
   assert.match(html, /<button id="open-entry-dialog"/);
   assert.match(html, /<button id="submit-entry"[^>]*type="submit"/);
   assert.match(app, /form\.addEventListener\("submit"/);
@@ -93,6 +96,10 @@ test("validation errors and interpolated UI copy are translated", () => {
   assert.equal(
     translateEntryError("th", "Rating must be a whole number from 0 to 9,999."),
     translate("th", "ratingError"),
+  );
+  assert.equal(
+    translateEntryError("en", "Failed to fetch"),
+    translate("en", "cloudConnectionError"),
   );
   assert.equal(
     translate("th", "submittedOn", { date: "28 ก.ย. 2569" }),

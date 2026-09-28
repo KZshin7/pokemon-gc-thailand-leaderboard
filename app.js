@@ -2,6 +2,15 @@ import { prepareEvidenceImage } from "./evidence.js";
 import { getTopRatedEntry, validateEntryFields } from "./entries.js";
 import { getLocalOwnerId, loadLocalEntries, saveLocalEntry } from "./local-store.js";
 import {
+  createEvidenceUrl,
+  getEntryEvidencePathForReview,
+  getMyEntry,
+  listPublicEntries,
+  reviewEntry,
+  saveCloudEntry,
+} from "./cloud-store.js";
+import { createSupabaseClient, getSupabaseConfig } from "./supabase-client.js";
+import {
   applyTranslations,
   loadLanguagePreference,
   normalizeLanguage,
@@ -32,6 +41,17 @@ const removeEvidence = document.querySelector("#remove-evidence");
 const submitButton = document.querySelector("#submit-entry");
 const submitLabel = document.querySelector("#submit-entry-label");
 const cancelButton = document.querySelector("#cancel-edit");
+const signInButton = document.querySelector("#sign-in-google");
+const signOutButton = document.querySelector("#sign-out");
+const dialogSignInButton = document.querySelector("#dialog-sign-in");
+const authStatus = document.querySelector("#auth-status");
+const authRequired = document.querySelector("#auth-required");
+const authMessage = document.querySelector("#auth-message");
+const prototypeNotice = document.querySelector(".prototype-notice");
+const noticeTitle = document.querySelector("#notice-title");
+const noticeDescription = document.querySelector("#notice-description");
+const entryFormDescription = document.querySelector("#form-description");
+const privacyNote = document.querySelector("#privacy-note");
 const languageButtons = {
   en: document.querySelector("#language-en"),
   th: document.querySelector("#language-th"),
@@ -39,6 +59,9 @@ const languageButtons = {
 
 let entries = [];
 let ownerId;
+let activeUser = null;
+let myCloudEntry = null;
+let isReviewer = false;
 let editingId = null;
 let dialogTrigger = openEntryDialogButton;
 let language = "en";
@@ -53,12 +76,19 @@ applyTranslations(language);
 updateLanguageButtons();
 openEntryDialogButton.disabled = false;
 
-try {
-  ownerId = getLocalOwnerId(window.localStorage);
-  entries = loadLocalEntries(window.localStorage);
-  renderEntries();
-} catch (error) {
-  showMessage(appMessage, translateLocalError(language, error), true);
+const supabaseConfig = getSupabaseConfig();
+const supabase = supabaseConfig ? createSupabaseClient(supabaseConfig) : null;
+setApplicationMode();
+
+if (supabase) {
+  void initializeCloud();
+} else {
+  try {
+    ownerId = getLocalOwnerId(window.localStorage);
+    entries = loadLocalEntries(window.localStorage);
+  } catch (error) {
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
   renderEntries();
 }
 
@@ -85,6 +115,10 @@ entryDialog.addEventListener("close", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (supabase && !activeUser) {
+    showMessage(formMessage, translate(language, "signInRequired"), true);
+    return;
+  }
   clearMessage(formMessage);
   submitButton.disabled = true;
 
@@ -96,23 +130,42 @@ form.addEventListener("submit", async (event) => {
     validateEntryFields(fields);
 
     const selectedFile = evidenceInput.files?.[0];
-    const evidenceDataUrl = selectedFile
-      ? await blobToDataUrl(await prepareEvidenceImage(selectedFile))
-      : null;
     const wasEditing = editingId !== null;
-    saveLocalEntry({
-      storage: window.localStorage,
-      ownerId,
-      fields,
-      entryId: editingId,
-      evidenceDataUrl,
-      removeEvidence: removeEvidence.checked,
-    });
-    entries = loadLocalEntries(window.localStorage);
+    if (supabase && activeUser) {
+      const evidenceBlob = selectedFile ? await prepareEvidenceImage(selectedFile) : null;
+      await saveCloudEntry({
+        client: supabase,
+        userId: activeUser.id,
+        fields,
+        entryId: editingId,
+        evidenceBlob,
+        existingEvidencePath: myCloudEntry?.evidencePath ?? null,
+        removeEvidence: removeEvidence.checked,
+      });
+      await refreshCloudEntries();
+    } else {
+      const evidenceDataUrl = selectedFile
+        ? await blobToDataUrl(await prepareEvidenceImage(selectedFile))
+        : null;
+      saveLocalEntry({
+        storage: window.localStorage,
+        ownerId,
+        fields,
+        entryId: editingId,
+        evidenceDataUrl,
+        removeEvidence: removeEvidence.checked,
+      });
+      entries = loadLocalEntries(window.localStorage);
+    }
     renderEntries();
     resetEditor();
     if (entryDialog.open) entryDialog.close();
-    showMessage(appMessage, translate(language, wasEditing ? "entryUpdated" : "entrySubmitted"));
+    showMessage(appMessage, translate(
+      language,
+      supabase
+        ? (wasEditing ? "entryUpdatedCloud" : "entrySubmittedCloud")
+        : (wasEditing ? "entryUpdated" : "entrySubmitted"),
+    ));
   } catch (error) {
     showMessage(formMessage, translateLocalError(language, error), true);
   } finally {
@@ -124,6 +177,10 @@ evidenceInput.addEventListener("change", () => {
   selectedFileName.textContent = evidenceInput.files?.[0]?.name ?? translate(language, "noFileSelected");
 });
 
+signInButton.addEventListener("click", () => void signInWithGoogle());
+dialogSignInButton.addEventListener("click", () => void signInWithGoogle());
+signOutButton.addEventListener("click", () => void signOut());
+
 function renderEntries() {
   entriesList.replaceChildren();
   const sortedEntries = [...entries].sort(
@@ -132,9 +189,7 @@ function renderEntries() {
   const leader = getTopRatedEntry(entries);
 
   entryCount.textContent = String(entries.length);
-  reviewCount.textContent = String(
-    entries.filter((entry) => entry.hasEvidence).length,
-  );
+  reviewCount.textContent = String(entries.filter((entry) => entry.hasEvidence && entry.verificationStatus === "pending").length);
 
   if (!leader) {
     topRatingStat.textContent = "—";
@@ -187,23 +242,16 @@ function renderEntryCard(entry) {
   details.textContent = translate(language, "submittedOn", { date: formatDate(entry.createdAt) });
   card.append(heading, rating, status, details);
 
-  if (entry.hasEvidence && entry.evidenceDataUrl) {
+  if (entry.hasEvidence && (entry.evidenceDataUrl || (supabase && (entry.isMine || isReviewer)))) {
     const evidenceButton = document.createElement("button");
     evidenceButton.type = "button";
     evidenceButton.className = "edit-button";
     evidenceButton.textContent = translate(language, "viewEvidence");
-    evidenceButton.addEventListener("click", () => {
-      if (card.querySelector(".evidence-thumbnail")) return;
-      const image = document.createElement("img");
-      image.className = "evidence-thumbnail";
-      image.src = entry.evidenceDataUrl;
-      image.alt = translate(language, "evidenceAlt", { name: entry.playerName });
-      card.append(image);
-    });
+    evidenceButton.addEventListener("click", () => void showEvidence(entry, card));
     card.append(evidenceButton);
   }
 
-  if (ownerId && entry.ownerId === ownerId) {
+  if ((supabase && entry.isMine) || (!supabase && ownerId && entry.ownerId === ownerId)) {
     const editButton = document.createElement("button");
     editButton.type = "button";
     editButton.className = "edit-button";
@@ -211,15 +259,33 @@ function renderEntryCard(entry) {
     editButton.addEventListener("click", (event) => editEntry(entry, event.currentTarget));
     card.append(editButton);
   }
+  if (supabase && isReviewer && entry.verificationStatus === "pending") {
+    const reviewActions = document.createElement("div");
+    reviewActions.className = "review-actions";
+    for (const [status, key] of [["verified", "markVerified"], ["rejected", "markRejected"]]) {
+      const reviewButton = document.createElement("button");
+      reviewButton.type = "button";
+      reviewButton.className = "secondary-button";
+      reviewButton.textContent = translate(language, key);
+      reviewButton.addEventListener("click", () => void setEntryReviewStatus(entry, status));
+      reviewActions.append(reviewButton);
+    }
+    card.append(reviewActions);
+  }
   return card;
 }
 
 function statusText(entry) {
+  if (entry.verificationStatus === "verified") return translate(language, "verifiedStatus");
+  if (entry.verificationStatus === "rejected") return translate(language, "rejectedStatus");
   return translate(language, entry.hasEvidence ? "evidenceUnverified" : "noEvidenceUnverified");
 }
 
 function editEntry(entry, trigger) {
-  if (!ownerId || entry.ownerId !== ownerId) {
+  const isOwnEntry = supabase
+    ? entry.isMine && activeUser !== null
+    : ownerId && entry.ownerId === ownerId;
+  if (!isOwnEntry) {
     showMessage(formMessage, translate(language, "onlyOwnEntry"), true);
     return;
   }
@@ -239,10 +305,15 @@ function editEntry(entry, trigger) {
     image.src = entry.evidenceDataUrl;
     image.alt = translate(language, "currentEvidenceAlt");
     currentEvidence.append(image);
+  } else if (supabase && myCloudEntry?.evidencePath) {
+    void showCurrentCloudEvidence(myCloudEntry.evidencePath);
   }
-  selectedFileName.textContent = entry.evidenceDataUrl
+  selectedFileName.textContent = (entry.evidenceDataUrl || (supabase && myCloudEntry?.evidencePath))
     ? translate(language, "existingEvidenceAttached")
     : translate(language, "noFileSelected");
+  if (supabase) {
+    removeEvidenceLabel.hidden = !myCloudEntry?.evidencePath;
+  }
   clearMessage(formMessage);
   openEntryDialog(trigger, form.elements.playerName);
 }
@@ -250,7 +321,7 @@ function editEntry(entry, trigger) {
 function openEntryDialog(trigger, initialFocus) {
   dialogTrigger = trigger;
   entryDialog.showModal();
-  (initialFocus ?? form.elements.playerName).focus();
+  (initialFocus ?? (supabase && !activeUser ? dialogSignInButton : form.elements.playerName)).focus();
 }
 
 function resetEditor() {
@@ -263,6 +334,7 @@ function resetEditor() {
   selectedFileName.textContent = translate(language, "evidenceFileHint");
   currentEvidence.replaceChildren();
   clearMessage(formMessage);
+  setFormAuthenticationState();
 }
 
 function updateLanguageButtons() {
@@ -275,9 +347,12 @@ function setLanguage(selectedLanguage) {
   language = normalizeLanguage(selectedLanguage);
   applyTranslations(language);
   updateLanguageButtons();
+  setApplicationMode();
+  setFormAuthenticationState();
   renderEntries();
   clearMessage(appMessage);
   clearMessage(formMessage);
+  clearMessage(authMessage);
   if (editingId !== null) {
     formTitle.textContent = translate(language, "editDialogTitle");
     submitLabel.textContent = translate(language, "saveChanges");
@@ -313,6 +388,162 @@ function translateLocalError(selectedLanguage, error) {
   const message = error?.message ?? "";
   const translated = translateEntryError(selectedLanguage, message);
   return translated === message ? translate(selectedLanguage, "localSaveError", { error: message }) : translated;
+}
+
+function setApplicationMode() {
+  if (supabase) {
+    noticeTitle.textContent = translate(language, "cloudModeTitle");
+    noticeDescription.textContent = translate(language, "cloudModeDescription");
+    entryFormDescription.textContent = translate(language, "cloudFormDescription");
+    privacyNote.textContent = translate(language, "cloudPrivacyNote");
+    signInButton.hidden = Boolean(activeUser);
+    signOutButton.hidden = !activeUser;
+    authStatus.textContent = activeUser ? translate(language, "signedInPrivate") : "";
+    prototypeNotice.classList.add("cloud-notice");
+  } else {
+    noticeTitle.textContent = translate(language, "localOnlyTitle");
+    noticeDescription.textContent = translate(language, "localOnlyDescription");
+    entryFormDescription.textContent = translate(language, "formDescription");
+    privacyNote.textContent = translate(language, "privacyNote");
+    signInButton.hidden = true;
+    signOutButton.hidden = true;
+    authStatus.textContent = "";
+    prototypeNotice.classList.remove("cloud-notice");
+  }
+}
+
+function setFormAuthenticationState() {
+  authRequired.hidden = !supabase || Boolean(activeUser);
+  form.hidden = Boolean(supabase && !activeUser);
+}
+
+async function initializeCloud() {
+  setFormAuthenticationState();
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    await updateAuthState(data.session?.user ?? null);
+    supabase.auth.onAuthStateChange((_event, session) => {
+      setTimeout(() => {
+        void updateAuthState(session?.user ?? null).catch((error) => {
+          showMessage(appMessage, translateLocalError(language, error), true);
+        });
+      }, 0);
+    });
+    supabase
+      .channel("leaderboard-entries")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "leaderboard_entries",
+      }, () => {
+        void refreshCloudEntries().catch((error) => {
+          showMessage(appMessage, translateLocalError(language, error), true);
+        });
+      })
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          showMessage(appMessage, translate(language, "liveUpdatesUnavailable"), true);
+        }
+      });
+  } catch (error) {
+    entries = [];
+    renderEntries();
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
+}
+
+async function updateAuthState(user) {
+  activeUser = user;
+  isReviewer = user?.app_metadata?.role === "leaderboard_reviewer";
+  myCloudEntry = null;
+  setApplicationMode();
+  setFormAuthenticationState();
+  await refreshCloudEntries();
+}
+
+async function refreshCloudEntries() {
+  if (!supabase) return;
+  const [publicEntries, ownEntry] = await Promise.all([
+    listPublicEntries(supabase),
+    activeUser ? getMyEntry(supabase) : Promise.resolve(null),
+  ]);
+  myCloudEntry = ownEntry;
+  entries = publicEntries.map((entry) => ({
+    ...entry,
+    isMine: entry.id === ownEntry?.id,
+    ...(entry.id === ownEntry?.id ? { evidencePath: ownEntry.evidencePath } : {}),
+  }));
+  renderEntries();
+}
+
+async function signInWithGoogle() {
+  if (!supabase) return;
+  const messageTarget = entryDialog.open ? authMessage : appMessage;
+  clearMessage(messageTarget);
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.href },
+    });
+    if (error) showMessage(messageTarget, translateLocalError(language, error), true);
+  } catch (error) {
+    showMessage(messageTarget, translateLocalError(language, error), true);
+  }
+}
+
+async function signOut() {
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) showMessage(appMessage, translateLocalError(language, error), true);
+  } catch (error) {
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
+}
+
+async function showEvidence(entry, card) {
+  if (card.querySelector(".evidence-thumbnail")) return;
+  try {
+    let evidenceUrl;
+    if (entry.evidenceDataUrl) {
+      evidenceUrl = entry.evidenceDataUrl;
+    } else {
+      const path = entry.isMine
+        ? myCloudEntry?.evidencePath
+        : await getEntryEvidencePathForReview(supabase, entry.id);
+      if (!path) throw new Error("No photo evidence is available for this entry.");
+      evidenceUrl = await createEvidenceUrl(supabase, path);
+    }
+    const image = document.createElement("img");
+    image.className = "evidence-thumbnail";
+    image.src = evidenceUrl;
+    image.alt = translate(language, "evidenceAlt", { name: entry.playerName });
+    card.append(image);
+  } catch (error) {
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
+}
+
+async function showCurrentCloudEvidence(evidencePath) {
+  try {
+    const image = document.createElement("img");
+    image.className = "evidence-thumbnail";
+    image.src = await createEvidenceUrl(supabase, evidencePath);
+    image.alt = translate(language, "currentEvidenceAlt");
+    currentEvidence.replaceChildren(image);
+  } catch (error) {
+    showMessage(formMessage, translateLocalError(language, error), true);
+  }
+}
+
+async function setEntryReviewStatus(entry, status) {
+  try {
+    await reviewEntry(supabase, entry.id, status);
+    await refreshCloudEntries();
+    showMessage(appMessage, translate(language, status === "verified" ? "entryVerified" : "entryRejected"));
+  } catch (error) {
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
 }
 
 function showMessage(element, message, isError = false) {
