@@ -3,7 +3,7 @@ create table if not exists public.leaderboard_entries (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users (id) on delete cascade,
   player_name text not null,
-  rating integer not null,
+  rating numeric not null,
   evidence_path text,
   has_evidence boolean not null default false,
   verification_status text not null default 'pending',
@@ -13,8 +13,6 @@ create table if not exists public.leaderboard_entries (
   updated_at timestamptz not null default now(),
   constraint leaderboard_entries_player_name_length
     check (char_length(btrim(player_name)) between 1 and 60),
-  constraint leaderboard_entries_rating_range
-    check (rating between 0 and 9999),
   constraint leaderboard_entries_owner_unique unique (owner_id),
   constraint leaderboard_entries_evidence_path_format
     check (evidence_path is null or evidence_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}\.jpg$'),
@@ -23,6 +21,14 @@ create table if not exists public.leaderboard_entries (
   constraint leaderboard_entries_verified_timestamp
     check ((verification_status = 'verified') = (verified_at is not null))
 );
+
+alter table public.leaderboard_entries
+  alter column rating type numeric using rating::numeric;
+alter table public.leaderboard_entries
+  drop constraint if exists leaderboard_entries_rating_range;
+alter table public.leaderboard_entries
+  add constraint leaderboard_entries_rating_range
+  check (rating between 0 and 9999 and rating = trunc(rating, 3));
 
 create or replace function public.is_leaderboard_reviewer()
 returns boolean

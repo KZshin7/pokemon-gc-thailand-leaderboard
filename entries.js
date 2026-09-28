@@ -7,20 +7,19 @@ export const ALLOWED_EVIDENCE_TYPES = new Set(["image/jpeg", "image/png", "image
 export function validateEntryFields(fields) {
   const playerName = String(fields.playerName ?? "").trim();
   const ratingValue = fields.rating;
-  const rating = Number(ratingValue);
+  const ratingText = String(ratingValue ?? "").trim();
+  const rating = Number(ratingText);
 
   if (!playerName || playerName.length > 60) {
     throw new Error("Enter a player name up to 60 characters.");
   }
   if (
-    ratingValue === undefined ||
-    ratingValue === null ||
-    String(ratingValue).trim() === "" ||
-    !Number.isInteger(rating) ||
+    !/^\d+(?:\.\d{1,3})?$/.test(ratingText) ||
+    !Number.isFinite(rating) ||
     rating < 0 ||
     rating > 9999
   ) {
-    throw new Error("Rating must be a whole number from 0 to 9,999.");
+    throw new Error("Rating must be from 0 to 9,999 with no more than 3 decimal places.");
   }
 
   return { playerName, rating };

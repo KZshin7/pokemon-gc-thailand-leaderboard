@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { listPublicEntries } from "./cloud-store.js";
+import { listPublicEntries, saveCloudEntry } from "./cloud-store.js";
 import { getSupabaseConfig } from "./supabase-client.js";
 
 test("Supabase configuration requires both a URL and anon key and rejects insecure remote URLs", () => {
@@ -62,6 +62,40 @@ test("public leaderboard query requests only public fields and excludes owner id
   assert.doesNotMatch(requestedFields, /owner_id|email|evidence_path|reviewed_by/i);
 });
 
+test("cloud save accepts three-place ratings and rejects excess precision before writing", async () => {
+  let inserted;
+  const client = {
+    from() {
+      return {
+        insert(values) {
+          inserted = values;
+          return this;
+        },
+        select() {
+          return this;
+        },
+        async single() {
+          return { data: { id: "saved-entry" }, error: null };
+        },
+      };
+    },
+  };
+  await saveCloudEntry({
+    client,
+    userId: "auth-user",
+    fields: { playerName: "Pika", rating: "1842.375" },
+  });
+  assert.equal(inserted.rating, 1842.375);
+  await assert.rejects(
+    saveCloudEntry({
+      client,
+      userId: "auth-user",
+      fields: { playerName: "Pika", rating: "1842.1234" },
+    }),
+    /no more than 3 decimal places/,
+  );
+});
+
 test("migration restricts public fields and protects ownership, review state, and private evidence", async () => {
   const migration = await readFile(
     new URL("./supabase/migrations/202609280001_leaderboard.sql", import.meta.url),
@@ -74,6 +108,8 @@ test("migration restricts public fields and protects ownership, review state, an
   assert.match(migration, /new\.verification_status := 'pending'/i);
   assert.match(migration, /new\.owner_id := auth\.uid\(\)/i);
   assert.match(migration, /grant insert \(player_name, rating, evidence_path\)/i);
+  assert.match(migration, /rating numeric not null/i);
+  assert.match(migration, /rating between 0 and 9999 and rating = trunc\(rating, 3\)/i);
   assert.match(migration, /role' = 'leaderboard_reviewer'/i);
   assert.match(migration, /verification_status in \('pending', 'verified', 'rejected'\)/i);
   assert.match(migration, /values \('leaderboard-evidence', 'leaderboard-evidence', false, 1048576, array\['image\/jpeg'\]\)/i);

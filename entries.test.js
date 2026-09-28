@@ -13,20 +13,26 @@ import {
 
 const validFields = { playerName: "Pika", rating: "1842" };
 
-test("validates player fields without collecting email", () => {
+test("validates integer ratings and up to three fractional digits", () => {
   assert.deepEqual(validateEntryFields(validFields), {
     playerName: "Pika",
     rating: 1842,
   });
+  for (const rating of ["0", "1842.1", "1842.12", "1842.123", "9999", "9999.000", "9998.999"]) {
+    assert.equal(validateEntryFields({ ...validFields, rating }).rating, Number(rating));
+  }
 });
 
-test("rejects empty or invalid player names and out-of-range ratings", () => {
+test("rejects empty or invalid player names and out-of-range or over-precision ratings", () => {
   for (const fields of [
     { ...validFields, playerName: " " },
     { ...validFields, playerName: "x".repeat(61) },
     { ...validFields, rating: "" },
     { ...validFields, rating: " " },
-    { ...validFields, rating: "1842.5" },
+    { ...validFields, rating: "1842.1234" },
+    { ...validFields, rating: "1842.0000" },
+    { ...validFields, rating: "9999.001" },
+    { ...validFields, rating: "1e3" },
     { ...validFields, rating: "-1" },
     { ...validFields, rating: "10000" },
   ]) {

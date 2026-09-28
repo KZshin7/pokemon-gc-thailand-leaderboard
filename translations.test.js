@@ -94,7 +94,7 @@ test("applies Thai translations to visible content and accessible input labels",
 
 test("validation errors and interpolated UI copy are translated", () => {
   assert.equal(
-    translateEntryError("th", "Rating must be a whole number from 0 to 9,999."),
+    translateEntryError("th", "Rating must be from 0 to 9,999 with no more than 3 decimal places."),
     translate("th", "ratingError"),
   );
   assert.equal(

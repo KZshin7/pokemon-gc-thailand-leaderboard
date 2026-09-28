@@ -10,6 +10,7 @@ test("static page has sharing metadata and an explicit setup/demo state", async 
   assert.match(html, /<link rel="icon"[^>]+href="\.\/favicon\.svg"/);
   assert.match(html, /href="\.\/"/);
   assert.match(html, /id="notice-description"[^>]+data-i18n="localOnlyDescription"/);
+  assert.match(html, /name="rating" type="number" min="0" max="9999" step="0\.001"/);
   assert.doesNotMatch(html, /(?:href|src)="\/(?:assets|app\.js|styles\.css|favicon)/);
 });
 

@@ -66,6 +66,25 @@ test("local edit updates its own entry and keeps verification unverified", () =>
   assert.equal(updated.updatedAt, 200);
 });
 
+test("local entries preserve fractional ratings through create and edit", () => {
+  const storage = memoryStorage();
+  const created = saveLocalEntry({
+    storage,
+    ownerId: "browser-owner",
+    fields: { playerName: "Pika", rating: "1842.375" },
+    createId: () => "fractional-entry",
+  });
+  assert.equal(created.rating, 1842.375);
+
+  const updated = saveLocalEntry({
+    storage,
+    ownerId: "browser-owner",
+    entryId: created.id,
+    fields: { playerName: "Pika", rating: "1842.125" },
+  });
+  assert.equal(updated.rating, 1842.125);
+});
+
 test("local store blocks edits from a different browser owner token and duplicate entries", () => {
   const storage = memoryStorage();
   const created = saveLocalEntry({
