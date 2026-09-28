@@ -21,6 +21,7 @@ test("validates integer ratings and up to three fractional digits", () => {
   for (const rating of ["0", "1842.1", "1842.12", "1842.123", "9999", "9999.000", "9998.999"]) {
     assert.equal(validateEntryFields({ ...validFields, rating }).rating, Number(rating));
   }
+  assert.equal(validateEntryFields({ ...validFields, rating: "1842,375" }).rating, 1842.375);
 });
 
 test("rejects empty or invalid player names and out-of-range or over-precision ratings", () => {
@@ -31,6 +32,8 @@ test("rejects empty or invalid player names and out-of-range or over-precision r
     { ...validFields, rating: " " },
     { ...validFields, rating: "1842.1234" },
     { ...validFields, rating: "1842.0000" },
+    { ...validFields, rating: "1842,1234" },
+    { ...validFields, rating: "1,234.5" },
     { ...validFields, rating: "9999.001" },
     { ...validFields, rating: "1e3" },
     { ...validFields, rating: "-1" },

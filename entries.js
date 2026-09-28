@@ -7,7 +7,8 @@ export const ALLOWED_EVIDENCE_TYPES = new Set(["image/jpeg", "image/png", "image
 export function validateEntryFields(fields) {
   const playerName = String(fields.playerName ?? "").trim();
   const ratingValue = fields.rating;
-  const ratingText = String(ratingValue ?? "").trim();
+  const enteredRating = String(ratingValue ?? "").trim();
+  const ratingText = enteredRating.replace(",", ".");
   const rating = Number(ratingText);
 
   if (!playerName || playerName.length > 60) {
