@@ -1,0 +1,96 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verifiedUser() {
+      return signedIn() && request.auth.token.get('email_verified', false) == true;
+    }
+
+    function admin() {
+      return verifiedUser() && request.auth.token.get('admin', false) == true;
+    }
+
+    function validPlayerFields(data) {
+      return data.playerName is string
+        && data.playerName.size() >= 1
+        && data.playerName.size() <= 60
+        && data.rating is int
+        && data.rating >= 0
+        && data.rating <= 9999;
+    }
+
+    match /entries/{entryId} {
+      allow read: if true;
+
+      allow create: if verifiedUser()
+        && entryId == request.auth.uid
+        && request.resource.data.keys().hasAll([
+          'ownerId', 'region', 'playerName', 'rating', 'hasEvidence', 'evidencePath',
+          'revision', 'reviewStatus', 'authorized', 'reviewedRevision',
+          'reviewedBy', 'reviewedAt', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'ownerId', 'region', 'playerName', 'rating', 'hasEvidence', 'evidencePath',
+          'revision', 'reviewStatus', 'authorized', 'reviewedRevision',
+          'reviewedBy', 'reviewedAt', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.region == 'TH'
+        && validPlayerFields(request.resource.data)
+        && request.resource.data.hasEvidence == (request.resource.data.evidencePath != null)
+        && (
+          request.resource.data.evidencePath == null
+          || request.resource.data.evidencePath.matches(
+            '^' + request.auth.uid + '/[1-9][0-9]{0,8}/evidence[.]jpg$'
+          )
+        )
+        && request.resource.data.revision == 1
+        && request.resource.data.reviewStatus == 'pending'
+        && request.resource.data.authorized == false
+        && request.resource.data.reviewedRevision == 0
+        && request.resource.data.reviewedBy == null
+        && request.resource.data.reviewedAt == null
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if verifiedUser()
+        && entryId == request.auth.uid
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'playerName', 'rating', 'hasEvidence', 'evidencePath', 'revision', 'updatedAt'
+        ])
+        && validPlayerFields(request.resource.data)
+        && request.resource.data.hasEvidence == (request.resource.data.evidencePath != null)
+        && (
+          request.resource.data.evidencePath == null
+          || request.resource.data.evidencePath.matches(
+            '^' + request.auth.uid + '/[1-9][0-9]{0,8}/evidence[.]jpg$'
+          )
+        )
+        && request.resource.data.revision == resource.data.revision + 1
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if admin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'reviewStatus', 'authorized', 'reviewedRevision', 'reviewedBy',
+          'reviewedAt', 'updatedAt'
+        ])
+        && request.resource.data.reviewStatus in ['authorized', 'rejected']
+        && request.resource.data.authorized == (request.resource.data.reviewStatus == 'authorized')
+        && request.resource.data.reviewedRevision == resource.data.revision
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.reviewedAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (
+          request.resource.data.reviewStatus != 'authorized'
+          || resource.data.hasEvidence == true
+        );
+
+      allow delete: if false;
+    }
+  }
+}

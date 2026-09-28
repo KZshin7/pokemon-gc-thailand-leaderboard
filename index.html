@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f7ff">
+    <meta name="description" content="A local-only Pokémon Champions Global Challenge leaderboard prototype for Thailand-region players.">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Global Challenge Thailand — Player Board">
+    <meta property="og:description" content="A local-only Pokémon Champions Global Challenge leaderboard prototype for Thailand-region players. Entries stay in this browser and do not sync.">
+    <meta name="twitter:card" content="summary">
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <title>Global Challenge Thailand — Player Board</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Global Challenge Thailand home" data-i18n-aria-label="homeLabel">
+        <span class="brand-mark" aria-hidden="true">GC</span>
+        <span><span data-i18n="brandTitle">THAILAND</span> <span class="brand-muted" data-i18n="brandSubtitle">PLAYER BOARD</span></span>
+      </a>
+      <span class="region-label"><span class="live-dot"></span> <span data-i18n="communityLeaderboard">Community leaderboard</span></span>
+      <div class="language-toggle" role="group" aria-label="Language" data-i18n-aria-label="languageLabel">
+        <button id="language-en" type="button" aria-pressed="true">EN</button>
+        <button id="language-th" type="button" aria-pressed="false">TH</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro">
+        <p class="eyebrow" data-i18n="heroEyebrow">POKÉMON CHAMPIONS · GLOBAL CHALLENGE</p>
+        <h1 data-i18n="heroTitle">for THAILAND region only</h1>
+        <p class="intro-copy" data-i18n="heroDescription">Share your rating and celebrate the local community with optional photo evidence.</p>
+        <div class="stat-row" aria-label="Leaderboard summary" data-i18n-aria-label="summaryLabel">
+          <div class="stat"><strong id="entry-count">0</strong><span data-i18n="playerEntriesCount">player entries</span></div>
+          <div class="stat-divider" aria-hidden="true"></div>
+          <div class="stat"><strong id="review-count">0</strong><span data-i18n="evidenceAwaitingCount">evidence photos (unverified)</span></div>
+          <div class="stat-divider" aria-hidden="true"></div>
+          <div class="stat"><strong id="top-rating-stat">—</strong><span data-i18n="topCommunityRatingCount">top community rating</span></div>
+        </div>
+      </section>
+
+      <aside class="prototype-notice" role="note">
+        <strong data-i18n="localOnlyTitle">Local-only prototype — not secure</strong>
+        <span data-i18n="localOnlyDescription">Entries stay in this browser and are not shared or synced. Do not submit confidential information. Browser-local edit controls are not secure ownership.</span>
+      </aside>
+
+      <p id="app-message" class="message" role="status" aria-live="polite"></p>
+
+      <div class="dashboard">
+        <section class="panel leaderboard-panel" aria-labelledby="leaderboard-title">
+          <div class="leaderboard-header">
+            <div>
+              <p class="eyebrow" data-i18n="thailandRegion">THAILAND REGION</p>
+              <h2 id="leaderboard-title" data-i18n="entriesTitle">Player entries</h2>
+            </div>
+            <button id="open-entry-dialog" class="primary-button submit-trigger" type="button">
+              <span data-i18n="submitYourRating">Submit your rating</span> <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <p class="leaderboard-copy" data-i18n="leaderboardDescription">Ratings are community-submitted and have not been independently confirmed.</p>
+          <section class="top-rating" aria-label="Highest community-submitted rating" data-i18n-aria-label="topRatingEyebrow">
+            <div>
+              <p class="eyebrow" data-i18n="topRatingEyebrow">TOP COMMUNITY RATING</p>
+              <h3 id="top-rating-name" data-i18n="noEntriesYet">No entries yet</h3>
+              <p id="top-rating-status" class="top-rating-status" data-i18n="firstToAddRating">Be the first to add a rating</p>
+            </div>
+            <p id="top-rating-value" class="top-rating-value">—</p>
+          </section>
+          <div id="entries-list" class="entries-list" aria-live="polite"></div>
+        </section>
+      </div>
+
+    </main>
+
+    <dialog id="entry-dialog" class="entry-dialog" aria-labelledby="form-title">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow" data-i18n="submissionEyebrow">YOUR SUBMISSION</p>
+          <h2 id="form-title" data-i18n="entryDialogTitle">Submit a player entry</h2>
+        </div>
+        <button id="close-entry-dialog" class="dialog-close" type="button" aria-label="Close submission dialog" data-i18n-aria-label="closeDialog">×</button>
+      </div>
+      <p class="panel-copy" data-i18n="formDescription">Submit a player name and rating. No account or email is required.</p>
+
+      <form id="entry-form">
+
+        <label for="player-name"><span data-i18n="playerName">Player name</span> <span class="required" data-i18n="required">Required</span></label>
+        <input id="player-name" name="playerName" type="text" maxlength="60" required placeholder="Your in-game or display name" data-i18n-placeholder="playerNamePlaceholder">
+
+        <label for="rating"><span data-i18n="rating">Rating</span> <span class="required" data-i18n="required">Required</span></label>
+        <input id="rating" name="rating" type="number" min="0" max="9999" step="1" required placeholder="e.g. 1842" data-i18n-placeholder="ratingPlaceholder">
+
+        <label for="evidence"><span data-i18n="photoEvidence">Photo evidence</span> <span class="optional" data-i18n="optional">Optional</span></label>
+        <input class="visually-hidden" id="evidence" name="evidence" type="file" accept="image/jpeg,image/png,image/webp">
+        <label class="upload-box" for="evidence">
+          <span class="upload-icon" aria-hidden="true">↑</span>
+          <span><strong data-i18n="choosePhoto">Choose a photo</strong><small id="selected-file-name" data-i18n="evidenceFileHint">JPEG, PNG, or WebP · source image up to 10 MB</small></span>
+        </label>
+        <div id="current-evidence" class="current-evidence"></div>
+        <label id="remove-evidence-label" class="checkbox-label" hidden>
+          <input id="remove-evidence" type="checkbox">
+          <span data-i18n="removeEvidence">Remove the current evidence photo</span>
+        </label>
+
+        <p class="privacy-note" data-i18n="privacyNote">Entries and optional photo evidence are stored in this browser only. Nothing is securely private or independently verified.</p>
+        <p id="form-message" class="message" role="status" aria-live="polite"></p>
+        <div class="form-actions">
+          <button id="submit-entry" class="primary-button" type="submit"><span id="submit-entry-label" data-i18n="submitEntry">Submit entry</span> <span aria-hidden="true">→</span></button>
+          <button id="cancel-edit" class="secondary-button" type="button" data-i18n="cancel">Cancel</button>
+        </div>
+      </form>
+    </dialog>
+
+    <footer>
+      <span data-i18n="communityRun">Community-run · Not affiliated with The Pokémon Company</span>
+      <span data-i18n="entriesUnverified">Entries and evidence are not independently verified</span>
+    </footer>
+  </body>
+</html>
