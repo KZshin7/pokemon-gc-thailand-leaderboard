@@ -47,11 +47,17 @@ export function validateCompressedEvidence(blob) {
 }
 
 export function getTopRatedEntry(entries) {
-  return [...entries].sort(
-    (a, b) =>
-      b.rating - a.rating ||
-      getTimestamp(b.createdAt) - getTimestamp(a.createdAt),
-  )[0] ?? null;
+  return getRankedEntries(entries)[0]?.entry ?? null;
+}
+
+export function getRankedEntries(entries) {
+  return [...entries]
+    .sort(
+      (a, b) =>
+        b.rating - a.rating ||
+        getTimestamp(b.createdAt) - getTimestamp(a.createdAt),
+    )
+    .map((entry, index) => ({ entry, rank: index + 1 }));
 }
 
 function getTimestamp(value) {

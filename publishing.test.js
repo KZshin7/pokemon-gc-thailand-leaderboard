@@ -11,6 +11,8 @@ test("static page has sharing metadata and an explicit setup/demo state", async 
   assert.match(html, /href="\.\/"/);
   assert.match(html, /id="notice-description"[^>]+data-i18n="localOnlyDescription"/);
   assert.match(html, /name="rating" type="text" inputmode="decimal" maxlength="8" pattern="\[0-9\]\+\(\[\.,\]\[0-9\]\{1,3\}\)\?"/);
+  assert.match(html, /id="leaderboard-title"/);
+  assert.match(html, /id="entries-list" class="entries-list" aria-live="polite"/);
   assert.doesNotMatch(html, /(?:href|src)="\/(?:assets|app\.js|styles\.css|favicon)/);
 });
 

@@ -1,5 +1,5 @@
 import { prepareEvidenceImage } from "./evidence.js";
-import { getTopRatedEntry, validateEntryFields } from "./entries.js";
+import { getRankedEntries, getTopRatedEntry, validateEntryFields } from "./entries.js";
 import { getLocalOwnerId, loadLocalEntries, saveLocalEntry } from "./local-store.js";
 import {
   createEvidenceUrl,
@@ -183,9 +183,7 @@ signOutButton.addEventListener("click", () => void signOut());
 
 function renderEntries() {
   entriesList.replaceChildren();
-  const sortedEntries = [...entries].sort(
-    (a, b) => b.rating - a.rating || timestampMillis(b.createdAt) - timestampMillis(a.createdAt),
-  );
+  const rankedEntries = getRankedEntries(entries);
   const leader = getTopRatedEntry(entries);
 
   entryCount.textContent = String(entries.length);
@@ -204,19 +202,32 @@ function renderEntries() {
     topRatingValue.textContent = rating;
   }
 
-  if (sortedEntries.length === 0) {
+  if (rankedEntries.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = translate(language, "firstThailandEntry");
     entriesList.append(empty);
   } else {
-    for (const entry of sortedEntries) entriesList.append(renderEntryCard(entry));
+    for (const { entry, rank } of rankedEntries) {
+      entriesList.append(renderEntryCard(entry, rank));
+    }
   }
 }
 
-function renderEntryCard(entry) {
+function renderEntryCard(entry, rank) {
   const card = document.createElement("article");
   card.className = "entry-card";
+  card.setAttribute("aria-label", translate(language, "rankedEntryLabel", {
+    rank: Number(rank).toLocaleString(language === "th" ? "th-TH" : "en"),
+    name: entry.playerName,
+  }));
+
+  const position = document.createElement("span");
+  position.className = "entry-rank";
+  position.setAttribute("aria-label", translate(language, "rankLabel", {
+    rank: Number(rank).toLocaleString(language === "th" ? "th-TH" : "en"),
+  }));
+  position.textContent = Number(rank).toLocaleString(language === "th" ? "th-TH" : "en");
 
   const heading = document.createElement("div");
   heading.className = "entry-heading";
@@ -240,7 +251,7 @@ function renderEntryCard(entry) {
   const details = document.createElement("p");
   details.className = "entry-date";
   details.textContent = translate(language, "submittedOn", { date: formatDate(entry.createdAt) });
-  card.append(heading, rating, status, details);
+  card.append(position, heading, rating, status, details);
 
   if (entry.hasEvidence && (entry.evidenceDataUrl || (supabase && (entry.isMine || isReviewer)))) {
     const evidenceButton = document.createElement("button");
@@ -369,10 +380,6 @@ function formatDate(value) {
   return Number.isNaN(date.getTime())
     ? translate(language, "dateUnavailable")
     : new Intl.DateTimeFormat(language === "th" ? "th-TH" : "en", { dateStyle: "medium" }).format(date);
-}
-
-function timestampMillis(value) {
-  return typeof value === "number" ? value : Date.parse(value) || 0;
 }
 
 function blobToDataUrl(blob) {
