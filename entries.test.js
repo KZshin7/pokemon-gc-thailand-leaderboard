@@ -5,6 +5,8 @@ import {
   MAX_EVIDENCE_BYTES,
   MAX_EVIDENCE_DIMENSION,
   MAX_EVIDENCE_SOURCE_BYTES,
+  filterRankedEntries,
+  getRankedEntries,
   getTopRatedEntry,
   validateCompressedEvidence,
   validateEntryFields,
@@ -13,20 +15,29 @@ import {
 
 const validFields = { playerName: "Pika", rating: "1842" };
 
-test("validates player fields without collecting email", () => {
+test("validates integer ratings and up to three fractional digits", () => {
   assert.deepEqual(validateEntryFields(validFields), {
     playerName: "Pika",
     rating: 1842,
   });
+  for (const rating of ["0", "1842.1", "1842.12", "1842.123", "9999", "9999.000", "9998.999"]) {
+    assert.equal(validateEntryFields({ ...validFields, rating }).rating, Number(rating));
+  }
+  assert.equal(validateEntryFields({ ...validFields, rating: "1842,375" }).rating, 1842.375);
 });
 
-test("rejects empty or invalid player names and out-of-range ratings", () => {
+test("rejects empty or invalid player names and out-of-range or over-precision ratings", () => {
   for (const fields of [
     { ...validFields, playerName: " " },
     { ...validFields, playerName: "x".repeat(61) },
     { ...validFields, rating: "" },
     { ...validFields, rating: " " },
-    { ...validFields, rating: "1842.5" },
+    { ...validFields, rating: "1842.1234" },
+    { ...validFields, rating: "1842.0000" },
+    { ...validFields, rating: "1842,1234" },
+    { ...validFields, rating: "1,234.5" },
+    { ...validFields, rating: "9999.001" },
+    { ...validFields, rating: "1e3" },
     { ...validFields, rating: "-1" },
     { ...validFields, rating: "10000" },
   ]) {
@@ -54,6 +65,36 @@ test("selects the highest rating for the leaderboard spotlight", () => {
   const higher = { id: "higher", rating: 2400, createdAt: "2026-01-01T00:00:00.000Z" };
   assert.equal(getTopRatedEntry([]), null);
   assert.equal(getTopRatedEntry([lower, higher]).id, "higher");
+});
+
+test("assigns sequential leaderboard ranks after sorting, including equal ratings", () => {
+  const entries = [
+    { id: "older-tie", playerName: "Older tie", rating: 1842.5, createdAt: "2026-01-01T00:00:00.000Z" },
+    { id: "lower", playerName: "Lower", rating: 1200, createdAt: "2026-01-03T00:00:00.000Z" },
+    { id: "newer-tie", playerName: "Newer tie", rating: 1842.5, createdAt: "2026-01-02T00:00:00.000Z" },
+  ];
+  assert.deepEqual(
+    getRankedEntries(entries).map(({ entry, rank }) => [entry.id, rank]),
+    [["newer-tie", 1], ["older-tie", 2], ["lower", 3]],
+  );
+});
+
+test("filters ranked entries by photo presence without renumbering their overall rank", () => {
+  const ranked = getRankedEntries([
+    { id: "photo-high", rating: 2000, hasEvidence: true, createdAt: 4 },
+    { id: "no-photo", rating: 1800, hasEvidence: false, createdAt: 3 },
+    { id: "photo-low", rating: 1600, hasEvidence: true, createdAt: 2 },
+  ]);
+  assert.deepEqual(filterRankedEntries(ranked, "all"), ranked);
+  assert.deepEqual(
+    filterRankedEntries(ranked, "with-photo").map(({ entry, rank }) => [entry.id, rank]),
+    [["photo-high", 1], ["photo-low", 3]],
+  );
+  assert.deepEqual(
+    filterRankedEntries(ranked, "without-photo").map(({ entry, rank }) => [entry.id, rank]),
+    [["no-photo", 2]],
+  );
+  assert.deepEqual(filterRankedEntries([], "with-photo"), []);
 });
 
 test("sets the client resize dimension within the configured image cap", () => {

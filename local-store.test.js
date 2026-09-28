@@ -38,7 +38,7 @@ test("submission handler data saves a local entry without email or Firebase conf
   assert.equal(storage.getItem(OWNER_STORAGE_KEY), "browser-owner");
 });
 
-test("local edit updates its own entry and keeps verification unverified", () => {
+test("local edit updates its own entry and photo without verification state", () => {
   const storage = memoryStorage();
   const ownerId = "browser-owner";
   const created = saveLocalEntry({
@@ -61,9 +61,39 @@ test("local edit updates its own entry and keeps verification unverified", () =>
   assert.equal(updated.rating, 1900);
   assert.equal(updated.evidenceDataUrl, created.evidenceDataUrl);
   assert.equal(updated.revision, 2);
-  assert.equal(updated.verificationStatus, "unverified");
+  assert.equal("verificationStatus" in updated, false);
   assert.equal(updated.createdAt, 100);
   assert.equal(updated.updatedAt, 200);
+});
+
+test("loading legacy demo entries removes obsolete verification status", () => {
+  const storage = memoryStorage({
+    [ENTRIES_STORAGE_KEY]: JSON.stringify([
+      { id: "legacy", playerName: "Pika", rating: 1842, verificationStatus: "unverified" },
+    ]),
+  });
+  const [entry] = loadLocalEntries(storage);
+  assert.equal(entry.playerName, "Pika");
+  assert.equal("verificationStatus" in entry, false);
+});
+
+test("local entries preserve fractional ratings through create and edit", () => {
+  const storage = memoryStorage();
+  const created = saveLocalEntry({
+    storage,
+    ownerId: "browser-owner",
+    fields: { playerName: "Pika", rating: "1842.375" },
+    createId: () => "fractional-entry",
+  });
+  assert.equal(created.rating, 1842.375);
+
+  const updated = saveLocalEntry({
+    storage,
+    ownerId: "browser-owner",
+    entryId: created.id,
+    fields: { playerName: "Pika", rating: "1842.125" },
+  });
+  assert.equal(updated.rating, 1842.125);
 });
 
 test("local store blocks edits from a different browser owner token and duplicate entries", () => {

@@ -34,8 +34,8 @@ test("both languages include every dictionary key and translate the requested he
   assert.equal(translate("en", "heroTitle"), "for THAILAND region only");
   assert.equal(translate("th", "heroTitle"), "สำหรับภูมิภาคประเทศไทยเท่านั้น");
   assert.notEqual(translate("en", "localOnlyDescription"), translate("th", "localOnlyDescription"));
-  assert.notEqual(translate("en", "evidenceAwaitingCount"), translate("th", "evidenceAwaitingCount"));
-  assert.notEqual(translate("en", "evidenceUnverified"), translate("th", "evidenceUnverified"));
+  assert.notEqual(translate("en", "entriesWithPhotos"), translate("th", "entriesWithPhotos"));
+  assert.notEqual(translate("en", "filterWithPhoto"), translate("th", "filterWithPhoto"));
 });
 
 test("static page translation and accessibility keys exist in both languages", async () => {
@@ -54,7 +54,10 @@ test("static page translation and accessibility keys exist in both languages", a
   assert.ok(entryForm, "entry form exists");
   assert.doesNotMatch(entryForm, /type="email"|name="email"/);
   assert.doesNotMatch(html, /firebase|auth-form/i);
-  assert.doesNotMatch(app, /firebase|email/i);
+  assert.doesNotMatch(app, /firebase|type="email"|name="email"/i);
+  assert.match(app, /getSupabaseConfig/);
+  assert.match(app, /signInWithOAuth/);
+  assert.match(app, /getMyEntry/);
   assert.match(html, /<button id="open-entry-dialog"/);
   assert.match(html, /<button id="submit-entry"[^>]*type="submit"/);
   assert.match(app, /form\.addEventListener\("submit"/);
@@ -91,8 +94,12 @@ test("applies Thai translations to visible content and accessible input labels",
 
 test("validation errors and interpolated UI copy are translated", () => {
   assert.equal(
-    translateEntryError("th", "Rating must be a whole number from 0 to 9,999."),
+    translateEntryError("th", "Rating must be from 0 to 9,999 with no more than 3 decimal places."),
     translate("th", "ratingError"),
+  );
+  assert.equal(
+    translateEntryError("en", "Failed to fetch"),
+    translate("en", "cloudConnectionError"),
   );
   assert.equal(
     translate("th", "submittedOn", { date: "28 ก.ย. 2569" }),

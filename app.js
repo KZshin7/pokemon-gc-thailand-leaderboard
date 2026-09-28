@@ -1,6 +1,13 @@
 import { prepareEvidenceImage } from "./evidence.js";
-import { getTopRatedEntry, validateEntryFields } from "./entries.js";
+import { filterRankedEntries, getRankedEntries, getTopRatedEntry, validateEntryFields } from "./entries.js";
 import { getLocalOwnerId, loadLocalEntries, saveLocalEntry } from "./local-store.js";
+import {
+  createEvidenceUrl,
+  getMyEntry,
+  listPublicEntries,
+  saveCloudEntry,
+} from "./cloud-store.js";
+import { createSupabaseClient, getSupabaseConfig } from "./supabase-client.js";
 import {
   applyTranslations,
   loadLanguagePreference,
@@ -16,8 +23,10 @@ const openEntryDialogButton = document.querySelector("#open-entry-dialog");
 const closeEntryDialogButton = document.querySelector("#close-entry-dialog");
 const formTitle = document.querySelector("#form-title");
 const entriesList = document.querySelector("#entries-list");
+const entryFilters = [...document.querySelectorAll("[data-entry-filter]")];
+const filterResultCount = document.querySelector("#filter-result-count");
 const entryCount = document.querySelector("#entry-count");
-const reviewCount = document.querySelector("#review-count");
+const photoEntryCount = document.querySelector("#photo-entry-count");
 const topRatingStat = document.querySelector("#top-rating-stat");
 const topRatingName = document.querySelector("#top-rating-name");
 const topRatingStatus = document.querySelector("#top-rating-status");
@@ -32,6 +41,17 @@ const removeEvidence = document.querySelector("#remove-evidence");
 const submitButton = document.querySelector("#submit-entry");
 const submitLabel = document.querySelector("#submit-entry-label");
 const cancelButton = document.querySelector("#cancel-edit");
+const signInButton = document.querySelector("#sign-in-google");
+const signOutButton = document.querySelector("#sign-out");
+const dialogSignInButton = document.querySelector("#dialog-sign-in");
+const authStatus = document.querySelector("#auth-status");
+const authRequired = document.querySelector("#auth-required");
+const authMessage = document.querySelector("#auth-message");
+const prototypeNotice = document.querySelector(".prototype-notice");
+const noticeTitle = document.querySelector("#notice-title");
+const noticeDescription = document.querySelector("#notice-description");
+const entryFormDescription = document.querySelector("#form-description");
+const privacyNote = document.querySelector("#privacy-note");
 const languageButtons = {
   en: document.querySelector("#language-en"),
   th: document.querySelector("#language-th"),
@@ -39,6 +59,9 @@ const languageButtons = {
 
 let entries = [];
 let ownerId;
+let activeUser = null;
+let myCloudEntry = null;
+let entryFilter = "all";
 let editingId = null;
 let dialogTrigger = openEntryDialogButton;
 let language = "en";
@@ -53,17 +76,30 @@ applyTranslations(language);
 updateLanguageButtons();
 openEntryDialogButton.disabled = false;
 
-try {
-  ownerId = getLocalOwnerId(window.localStorage);
-  entries = loadLocalEntries(window.localStorage);
-  renderEntries();
-} catch (error) {
-  showMessage(appMessage, translateLocalError(language, error), true);
+const supabaseConfig = getSupabaseConfig();
+const supabase = supabaseConfig ? createSupabaseClient(supabaseConfig) : null;
+setApplicationMode();
+
+if (supabase) {
+  void initializeCloud();
+} else {
+  try {
+    ownerId = getLocalOwnerId(window.localStorage);
+    entries = loadLocalEntries(window.localStorage);
+  } catch (error) {
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
   renderEntries();
 }
 
 for (const [selectedLanguage, button] of Object.entries(languageButtons)) {
   button.addEventListener("click", () => setLanguage(selectedLanguage));
+}
+for (const button of entryFilters) {
+  button.addEventListener("click", () => {
+    entryFilter = button.dataset.entryFilter;
+    renderEntries();
+  });
 }
 
 openEntryDialogButton.addEventListener("click", () => {
@@ -85,6 +121,10 @@ entryDialog.addEventListener("close", () => {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (supabase && !activeUser) {
+    showMessage(formMessage, translate(language, "signInRequired"), true);
+    return;
+  }
   clearMessage(formMessage);
   submitButton.disabled = true;
 
@@ -96,23 +136,42 @@ form.addEventListener("submit", async (event) => {
     validateEntryFields(fields);
 
     const selectedFile = evidenceInput.files?.[0];
-    const evidenceDataUrl = selectedFile
-      ? await blobToDataUrl(await prepareEvidenceImage(selectedFile))
-      : null;
     const wasEditing = editingId !== null;
-    saveLocalEntry({
-      storage: window.localStorage,
-      ownerId,
-      fields,
-      entryId: editingId,
-      evidenceDataUrl,
-      removeEvidence: removeEvidence.checked,
-    });
-    entries = loadLocalEntries(window.localStorage);
+    if (supabase && activeUser) {
+      const evidenceBlob = selectedFile ? await prepareEvidenceImage(selectedFile) : null;
+      await saveCloudEntry({
+        client: supabase,
+        userId: activeUser.id,
+        fields,
+        entryId: editingId,
+        evidenceBlob,
+        existingEvidencePath: myCloudEntry?.evidencePath ?? null,
+        removeEvidence: removeEvidence.checked,
+      });
+      await refreshCloudEntries();
+    } else {
+      const evidenceDataUrl = selectedFile
+        ? await blobToDataUrl(await prepareEvidenceImage(selectedFile))
+        : null;
+      saveLocalEntry({
+        storage: window.localStorage,
+        ownerId,
+        fields,
+        entryId: editingId,
+        evidenceDataUrl,
+        removeEvidence: removeEvidence.checked,
+      });
+      entries = loadLocalEntries(window.localStorage);
+    }
     renderEntries();
     resetEditor();
     if (entryDialog.open) entryDialog.close();
-    showMessage(appMessage, translate(language, wasEditing ? "entryUpdated" : "entrySubmitted"));
+    showMessage(appMessage, translate(
+      language,
+      supabase
+        ? (wasEditing ? "entryUpdatedCloud" : "entrySubmittedCloud")
+        : (wasEditing ? "entryUpdated" : "entrySubmitted"),
+    ));
   } catch (error) {
     showMessage(formMessage, translateLocalError(language, error), true);
   } finally {
@@ -124,17 +183,23 @@ evidenceInput.addEventListener("change", () => {
   selectedFileName.textContent = evidenceInput.files?.[0]?.name ?? translate(language, "noFileSelected");
 });
 
+signInButton.addEventListener("click", () => void signInWithGoogle());
+dialogSignInButton.addEventListener("click", () => void signInWithGoogle());
+signOutButton.addEventListener("click", () => void signOut());
+
 function renderEntries() {
   entriesList.replaceChildren();
-  const sortedEntries = [...entries].sort(
-    (a, b) => b.rating - a.rating || timestampMillis(b.createdAt) - timestampMillis(a.createdAt),
-  );
+  const rankedEntries = getRankedEntries(entries);
+  const filteredEntries = filterRankedEntries(rankedEntries, entryFilter);
   const leader = getTopRatedEntry(entries);
 
   entryCount.textContent = String(entries.length);
-  reviewCount.textContent = String(
-    entries.filter((entry) => entry.hasEvidence).length,
-  );
+  photoEntryCount.textContent = String(entries.filter((entry) => entry.hasEvidence).length);
+  filterResultCount.textContent = translate(language, "filterResultCount", {
+    shown: Number(filteredEntries.length).toLocaleString(language === "th" ? "th-TH" : "en"),
+    total: Number(entries.length).toLocaleString(language === "th" ? "th-TH" : "en"),
+  });
+  updateEntryFilters();
 
   if (!leader) {
     topRatingStat.textContent = "—";
@@ -145,23 +210,63 @@ function renderEntries() {
     const rating = Number(leader.rating).toLocaleString(language === "th" ? "th-TH" : "en");
     topRatingStat.textContent = rating;
     topRatingName.textContent = leader.playerName;
-    topRatingStatus.textContent = statusText(leader);
+    topRatingStatus.textContent = translate(language, "highestRatingListed");
     topRatingValue.textContent = rating;
   }
 
-  if (sortedEntries.length === 0) {
+  if (entries.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = translate(language, "firstThailandEntry");
     entriesList.append(empty);
+  } else if (filteredEntries.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = translate(
+      language,
+      entryFilter === "with-photo" ? "noEntriesWithPhoto" : "noEntriesWithoutPhoto",
+    );
+    entriesList.append(empty);
   } else {
-    for (const entry of sortedEntries) entriesList.append(renderEntryCard(entry));
+    for (const { entry, rank } of filteredEntries) {
+      entriesList.append(renderEntryCard(entry, rank));
+    }
   }
 }
 
-function renderEntryCard(entry) {
+function updateEntryFilters() {
+  const counts = {
+    all: entries.length,
+    "with-photo": entries.filter((entry) => entry.hasEvidence).length,
+    "without-photo": entries.filter((entry) => !entry.hasEvidence).length,
+  };
+  for (const button of entryFilters) {
+    const filter = button.dataset.entryFilter;
+    button.setAttribute("aria-pressed", String(entryFilter === filter));
+    button.textContent = translate(language, `filter${filterKey(filter)}`, {
+      count: Number(counts[filter]).toLocaleString(language === "th" ? "th-TH" : "en"),
+    });
+  }
+}
+
+function filterKey(filter) {
+  return filter === "with-photo" ? "WithPhoto" : filter === "without-photo" ? "WithoutPhoto" : "All";
+}
+
+function renderEntryCard(entry, rank) {
   const card = document.createElement("article");
   card.className = "entry-card";
+  card.setAttribute("aria-label", translate(language, "rankedEntryLabel", {
+    rank: Number(rank).toLocaleString(language === "th" ? "th-TH" : "en"),
+    name: entry.playerName,
+  }));
+
+  const position = document.createElement("span");
+  position.className = "entry-rank";
+  position.setAttribute("aria-label", translate(language, "rankLabel", {
+    rank: Number(rank).toLocaleString(language === "th" ? "th-TH" : "en"),
+  }));
+  position.textContent = Number(rank).toLocaleString(language === "th" ? "th-TH" : "en");
 
   const heading = document.createElement("div");
   heading.className = "entry-heading";
@@ -178,32 +283,24 @@ function renderEntryCard(entry) {
   ratingLabel.textContent = translate(language, "rating");
   rating.append(ratingValue, ratingLabel);
 
-  const status = document.createElement("p");
-  status.className = "entry-status";
-  status.textContent = statusText(entry);
-
   const details = document.createElement("p");
   details.className = "entry-date";
   details.textContent = translate(language, "submittedOn", { date: formatDate(entry.createdAt) });
-  card.append(heading, rating, status, details);
+  const photoPresence = document.createElement("p");
+  photoPresence.className = "entry-photo-presence";
+  photoPresence.textContent = translate(language, entry.hasEvidence ? "hasPhoto" : "noPhoto");
+  card.append(position, heading, rating, photoPresence, details);
 
-  if (entry.hasEvidence && entry.evidenceDataUrl) {
+  if (entry.hasEvidence && (entry.evidenceDataUrl || (supabase && entry.isMine))) {
     const evidenceButton = document.createElement("button");
     evidenceButton.type = "button";
     evidenceButton.className = "edit-button";
     evidenceButton.textContent = translate(language, "viewEvidence");
-    evidenceButton.addEventListener("click", () => {
-      if (card.querySelector(".evidence-thumbnail")) return;
-      const image = document.createElement("img");
-      image.className = "evidence-thumbnail";
-      image.src = entry.evidenceDataUrl;
-      image.alt = translate(language, "evidenceAlt", { name: entry.playerName });
-      card.append(image);
-    });
+    evidenceButton.addEventListener("click", () => void showEvidence(entry, card));
     card.append(evidenceButton);
   }
 
-  if (ownerId && entry.ownerId === ownerId) {
+  if ((supabase && entry.isMine) || (!supabase && ownerId && entry.ownerId === ownerId)) {
     const editButton = document.createElement("button");
     editButton.type = "button";
     editButton.className = "edit-button";
@@ -214,12 +311,11 @@ function renderEntryCard(entry) {
   return card;
 }
 
-function statusText(entry) {
-  return translate(language, entry.hasEvidence ? "evidenceUnverified" : "noEvidenceUnverified");
-}
-
 function editEntry(entry, trigger) {
-  if (!ownerId || entry.ownerId !== ownerId) {
+  const isOwnEntry = supabase
+    ? entry.isMine && activeUser !== null
+    : ownerId && entry.ownerId === ownerId;
+  if (!isOwnEntry) {
     showMessage(formMessage, translate(language, "onlyOwnEntry"), true);
     return;
   }
@@ -239,10 +335,15 @@ function editEntry(entry, trigger) {
     image.src = entry.evidenceDataUrl;
     image.alt = translate(language, "currentEvidenceAlt");
     currentEvidence.append(image);
+  } else if (supabase && myCloudEntry?.evidencePath) {
+    void showCurrentCloudEvidence(myCloudEntry.evidencePath);
   }
-  selectedFileName.textContent = entry.evidenceDataUrl
+  selectedFileName.textContent = (entry.evidenceDataUrl || (supabase && myCloudEntry?.evidencePath))
     ? translate(language, "existingEvidenceAttached")
     : translate(language, "noFileSelected");
+  if (supabase) {
+    removeEvidenceLabel.hidden = !myCloudEntry?.evidencePath;
+  }
   clearMessage(formMessage);
   openEntryDialog(trigger, form.elements.playerName);
 }
@@ -250,7 +351,7 @@ function editEntry(entry, trigger) {
 function openEntryDialog(trigger, initialFocus) {
   dialogTrigger = trigger;
   entryDialog.showModal();
-  (initialFocus ?? form.elements.playerName).focus();
+  (initialFocus ?? (supabase && !activeUser ? dialogSignInButton : form.elements.playerName)).focus();
 }
 
 function resetEditor() {
@@ -263,6 +364,7 @@ function resetEditor() {
   selectedFileName.textContent = translate(language, "evidenceFileHint");
   currentEvidence.replaceChildren();
   clearMessage(formMessage);
+  setFormAuthenticationState();
 }
 
 function updateLanguageButtons() {
@@ -275,9 +377,12 @@ function setLanguage(selectedLanguage) {
   language = normalizeLanguage(selectedLanguage);
   applyTranslations(language);
   updateLanguageButtons();
+  setApplicationMode();
+  setFormAuthenticationState();
   renderEntries();
   clearMessage(appMessage);
   clearMessage(formMessage);
+  clearMessage(authMessage);
   if (editingId !== null) {
     formTitle.textContent = translate(language, "editDialogTitle");
     submitLabel.textContent = translate(language, "saveChanges");
@@ -296,10 +401,6 @@ function formatDate(value) {
     : new Intl.DateTimeFormat(language === "th" ? "th-TH" : "en", { dateStyle: "medium" }).format(date);
 }
 
-function timestampMillis(value) {
-  return typeof value === "number" ? value : Date.parse(value) || 0;
-}
-
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -313,6 +414,149 @@ function translateLocalError(selectedLanguage, error) {
   const message = error?.message ?? "";
   const translated = translateEntryError(selectedLanguage, message);
   return translated === message ? translate(selectedLanguage, "localSaveError", { error: message }) : translated;
+}
+
+function setApplicationMode() {
+  if (supabase) {
+    noticeTitle.textContent = translate(language, "cloudModeTitle");
+    noticeDescription.textContent = translate(language, "cloudModeDescription");
+    entryFormDescription.textContent = translate(language, "cloudFormDescription");
+    privacyNote.textContent = translate(language, "cloudPrivacyNote");
+    signInButton.hidden = Boolean(activeUser);
+    signOutButton.hidden = !activeUser;
+    authStatus.textContent = activeUser ? translate(language, "signedInPrivate") : "";
+    prototypeNotice.classList.add("cloud-notice");
+  } else {
+    noticeTitle.textContent = translate(language, "localOnlyTitle");
+    noticeDescription.textContent = translate(language, "localOnlyDescription");
+    entryFormDescription.textContent = translate(language, "formDescription");
+    privacyNote.textContent = translate(language, "privacyNote");
+    signInButton.hidden = true;
+    signOutButton.hidden = true;
+    authStatus.textContent = "";
+    prototypeNotice.classList.remove("cloud-notice");
+  }
+}
+
+function setFormAuthenticationState() {
+  authRequired.hidden = !supabase || Boolean(activeUser);
+  form.hidden = Boolean(supabase && !activeUser);
+}
+
+async function initializeCloud() {
+  setFormAuthenticationState();
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    await updateAuthState(data.session?.user ?? null);
+    supabase.auth.onAuthStateChange((_event, session) => {
+      setTimeout(() => {
+        void updateAuthState(session?.user ?? null).catch((error) => {
+          showMessage(appMessage, translateLocalError(language, error), true);
+        });
+      }, 0);
+    });
+    supabase
+      .channel("leaderboard-entries")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "leaderboard_entries",
+      }, () => {
+        void refreshCloudEntries().catch((error) => {
+          showMessage(appMessage, translateLocalError(language, error), true);
+        });
+      })
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          showMessage(appMessage, translate(language, "liveUpdatesUnavailable"), true);
+        }
+      });
+  } catch (error) {
+    entries = [];
+    renderEntries();
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
+}
+
+async function updateAuthState(user) {
+  activeUser = user;
+  myCloudEntry = null;
+  setApplicationMode();
+  setFormAuthenticationState();
+  await refreshCloudEntries();
+}
+
+async function refreshCloudEntries() {
+  if (!supabase) return;
+  const [publicEntries, ownEntry] = await Promise.all([
+    listPublicEntries(supabase),
+    activeUser ? getMyEntry(supabase) : Promise.resolve(null),
+  ]);
+  myCloudEntry = ownEntry;
+  entries = publicEntries.map((entry) => ({
+    ...entry,
+    isMine: entry.id === ownEntry?.id,
+    ...(entry.id === ownEntry?.id ? { evidencePath: ownEntry.evidencePath } : {}),
+  }));
+  renderEntries();
+}
+
+async function signInWithGoogle() {
+  if (!supabase) return;
+  const messageTarget = entryDialog.open ? authMessage : appMessage;
+  clearMessage(messageTarget);
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.href },
+    });
+    if (error) showMessage(messageTarget, translateLocalError(language, error), true);
+  } catch (error) {
+    showMessage(messageTarget, translateLocalError(language, error), true);
+  }
+}
+
+async function signOut() {
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) showMessage(appMessage, translateLocalError(language, error), true);
+  } catch (error) {
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
+}
+
+async function showEvidence(entry, card) {
+  if (card.querySelector(".evidence-thumbnail")) return;
+  try {
+    let evidenceUrl;
+    if (entry.evidenceDataUrl) {
+      evidenceUrl = entry.evidenceDataUrl;
+    } else {
+      const path = entry.isMine ? myCloudEntry?.evidencePath : null;
+      if (!path) throw new Error("No photo evidence is available for this entry.");
+      evidenceUrl = await createEvidenceUrl(supabase, path);
+    }
+    const image = document.createElement("img");
+    image.className = "evidence-thumbnail";
+    image.src = evidenceUrl;
+    image.alt = translate(language, "evidenceAlt", { name: entry.playerName });
+    card.append(image);
+  } catch (error) {
+    showMessage(appMessage, translateLocalError(language, error), true);
+  }
+}
+
+async function showCurrentCloudEvidence(evidencePath) {
+  try {
+    const image = document.createElement("img");
+    image.className = "evidence-thumbnail";
+    image.src = await createEvidenceUrl(supabase, evidencePath);
+    image.alt = translate(language, "currentEvidenceAlt");
+    currentEvidence.replaceChildren(image);
+  } catch (error) {
+    showMessage(formMessage, translateLocalError(language, error), true);
+  }
 }
 
 function showMessage(element, message, isError = false) {

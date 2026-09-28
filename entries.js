@@ -7,20 +7,20 @@ export const ALLOWED_EVIDENCE_TYPES = new Set(["image/jpeg", "image/png", "image
 export function validateEntryFields(fields) {
   const playerName = String(fields.playerName ?? "").trim();
   const ratingValue = fields.rating;
-  const rating = Number(ratingValue);
+  const enteredRating = String(ratingValue ?? "").trim();
+  const ratingText = enteredRating.replace(",", ".");
+  const rating = Number(ratingText);
 
   if (!playerName || playerName.length > 60) {
     throw new Error("Enter a player name up to 60 characters.");
   }
   if (
-    ratingValue === undefined ||
-    ratingValue === null ||
-    String(ratingValue).trim() === "" ||
-    !Number.isInteger(rating) ||
+    !/^\d+(?:\.\d{1,3})?$/.test(ratingText) ||
+    !Number.isFinite(rating) ||
     rating < 0 ||
     rating > 9999
   ) {
-    throw new Error("Rating must be a whole number from 0 to 9,999.");
+    throw new Error("Rating must be from 0 to 9,999 with no more than 3 decimal places.");
   }
 
   return { playerName, rating };
@@ -47,11 +47,27 @@ export function validateCompressedEvidence(blob) {
 }
 
 export function getTopRatedEntry(entries) {
-  return [...entries].sort(
-    (a, b) =>
-      b.rating - a.rating ||
-      getTimestamp(b.createdAt) - getTimestamp(a.createdAt),
-  )[0] ?? null;
+  return getRankedEntries(entries)[0]?.entry ?? null;
+}
+
+export function getRankedEntries(entries) {
+  return [...entries]
+    .sort(
+      (a, b) =>
+        b.rating - a.rating ||
+        getTimestamp(b.createdAt) - getTimestamp(a.createdAt),
+    )
+    .map((entry, index) => ({ entry, rank: index + 1 }));
+}
+
+export function filterRankedEntries(rankedEntries, filter) {
+  if (filter === "with-photo") {
+    return rankedEntries.filter(({ entry }) => entry.hasEvidence);
+  }
+  if (filter === "without-photo") {
+    return rankedEntries.filter(({ entry }) => !entry.hasEvidence);
+  }
+  return rankedEntries;
 }
 
 function getTimestamp(value) {
