@@ -1,0 +1,33 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function verifiedUser() {
+      return request.auth != null && request.auth.token.get('email_verified', false) == true;
+    }
+
+    function admin() {
+      return request.auth != null
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.get('admin', false) == true;
+    }
+
+    function validEvidence() {
+      return request.resource.size > 0
+        && request.resource.size <= 1000000
+        && request.resource.contentType == 'image/jpeg';
+    }
+
+    match /{userId}/{revision}/evidence.jpg {
+      allow read: if verifiedUser()
+        && (request.auth.uid == userId || admin());
+      allow create, update: if verifiedUser()
+        && request.auth.uid == userId
+        && revision.matches('^[1-9][0-9]{0,8}$')
+        && validEvidence();
+      allow delete: if verifiedUser()
+        && request.auth.uid == userId
+        && revision.matches('^[1-9][0-9]{0,8}$');
+    }
+  }
+}
